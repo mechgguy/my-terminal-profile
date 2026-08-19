@@ -309,7 +309,6 @@ Set-Alias -Name wt -Value weather
 # =================================
 # MENSA MENU
 # =================================
-
 function mensa {
     param(
         [switch]$Week,
@@ -331,7 +330,7 @@ function mensa {
         $response = Invoke-WebRequest -Uri $url -UseBasicParsing
         $html = $response.Content
 
-        # Fix UTF-8 mojibake caused by Windows PowerShell 5.1
+        # Fix UTF-8 decoding for Windows PowerShell 5.1
         $enc = [System.Text.Encoding]::GetEncoding(28591)
         $utf8 = [System.Text.Encoding]::UTF8
         $bytes = $enc.GetBytes($html)
@@ -346,7 +345,8 @@ function mensa {
         $days = @()
 
         foreach ($header in $headers) {
-            $link = $header.getElementsByTagName("a") | Select-Object -First 1
+            $link = $header.getElementsByTagName("a") |
+                Select-Object -First 1
 
             if (-not $link) {
                 continue
@@ -375,7 +375,6 @@ function mensa {
             return
         }
 
-        # Find next available day
         if ($Next) {
             $nextDay = $days |
                 Where-Object { $_.Date -gt $today } |
@@ -394,7 +393,6 @@ function mensa {
         Write-Host " M E N S A   V I T A" -ForegroundColor Cyan
         Write-Host " ==============================================" -ForegroundColor DarkGray
 
-        # Determine days to display
         if ($Week) {
             $selectedDays = $days |
                 Where-Object {
@@ -414,14 +412,17 @@ function mensa {
         if (-not $selectedDays) {
             Write-Host " No Mensa Vita menu found for the requested day." `
                 -ForegroundColor Yellow
+
             Write-Host " ==============================================" `
                 -ForegroundColor DarkGray
+
             return
         }
 
         foreach ($day in @($selectedDays)) {
 
             Write-Host ""
+
             Write-Host (
                 " {0} - {1}" -f
                 $day.Name,
@@ -431,7 +432,6 @@ function mensa {
             Write-Host " ----------------------------------------------" `
                 -ForegroundColor DarkGray
 
-            # The day's panel is the next sibling after the h3
             $panel = $day.Header.nextSibling
 
             while ($panel -and $panel.nodeType -ne 1) {
@@ -443,18 +443,20 @@ function mensa {
             }
 
             $rows = $panel.getElementsByTagName("tr")
-
             $found = $false
 
             foreach ($row in $rows) {
 
-                $categoryNode = $row.getElementsByClassName("menue-category") |
+                $categoryNode =
+                    $row.getElementsByClassName("menue-category") |
                     Select-Object -First 1
 
-                $descNode = $row.getElementsByClassName("menue-desc") |
+                $descNode =
+                    $row.getElementsByClassName("menue-desc") |
                     Select-Object -First 1
 
-                $priceNode = $row.getElementsByClassName("menue-price") |
+                $priceNode =
+                    $row.getElementsByClassName("menue-price") |
                     Select-Object -First 1
 
                 if (-not $categoryNode -or -not $descNode) {
@@ -464,20 +466,27 @@ function mensa {
                 $category = $categoryNode.innerText.Trim()
                 $description = $descNode.innerText.Trim()
 
-		if ($priceNode) {
-    			$price = $priceNode.innerText.Trim()
-    			$price = $price -replace '[^0-9,\.]', ''
-    			$price = "$price EUR"
-			}
-		else {
-    			$price = ""
-		}
+                if ($priceNode) {
+                    $price = $priceNode.innerText.Trim()
 
-                Write-Host (" {0} + {1}" -f $category, $description)
+                    # Keep only the numeric price
+                    $price = $price -replace '[^0-9,\.]', ''
+                    $price = "$price EUR"
+                }
+                else {
+                    $price = ""
+                }
+
+                Write-Host (
+                    " {0} + {1}" -f
+                    $category,
+                    $description
+                )
 
                 if ($price) {
-                    Write-Host ("    {0}" -f $price) `
-                        -ForegroundColor Green
+                    Write-Host (
+                        "    {0}" -f $price
+                    ) -ForegroundColor Green
                 }
 
                 Write-Host ""
@@ -497,6 +506,7 @@ function mensa {
     catch {
         Write-Host "Failed to retrieve Mensa Vita menu." `
             -ForegroundColor Red
+
         Write-Host $_.Exception.Message `
             -ForegroundColor DarkRed
     }
