@@ -3,6 +3,12 @@ $WeatherLongitude = 8.6821
 $WeatherLocation  = "Frankfurt"
 
 # ─────────────────────────────────────────────
+# Conda
+# ─────────────────────────────────────────────
+
+& "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"
+
+# ─────────────────────────────────────────────
 # Chocolatey + Git PATH
 # ─────────────────────────────────────────────
 
