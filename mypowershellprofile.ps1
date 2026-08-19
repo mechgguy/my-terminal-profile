@@ -305,3 +305,199 @@ function weather {
 }
 
 Set-Alias -Name wt -Value weather
+
+# =================================
+# MENSA MENU
+# =================================
+
+function mensa {
+    param(
+        [switch]$Week,
+        [switch]$Tomorrow,
+        [switch]$Next
+    )
+
+    $url = "https://www.studierendenwerk-aachen.de/speiseplaene/vita-w.html"
+    $today = (Get-Date).Date
+
+    if ($Tomorrow) {
+        $targetDate = $today.AddDays(1)
+    }
+    else {
+        $targetDate = $today
+    }
+
+    try {
+        $response = Invoke-WebRequest -Uri $url -UseBasicParsing
+        $html = $response.Content
+
+        # Fix UTF-8 mojibake caused by Windows PowerShell 5.1
+        $enc = [System.Text.Encoding]::GetEncoding(28591)
+        $utf8 = [System.Text.Encoding]::UTF8
+        $bytes = $enc.GetBytes($html)
+        $html = $utf8.GetString($bytes)
+
+        # Parse HTML
+        $doc = New-Object -ComObject "HTMLFile"
+        $doc.IHTMLDocument2_write($html)
+        $doc.Close()
+
+        $headers = $doc.getElementsByTagName("h3")
+        $days = @()
+
+        foreach ($header in $headers) {
+            $link = $header.getElementsByTagName("a") | Select-Object -First 1
+
+            if (-not $link) {
+                continue
+            }
+
+            $dateText = $link.innerText.Trim()
+
+            if ($dateText -match '^(Montag|Dienstag|Mittwoch|Donnerstag|Freitag),?\s+(\d{2}\.\d{2}\.\d{4})$') {
+
+                $date = [datetime]::ParseExact(
+                    $Matches[2],
+                    "dd.MM.yyyy",
+                    [Globalization.CultureInfo]::InvariantCulture
+                )
+
+                $days += [PSCustomObject]@{
+                    Name   = $Matches[1]
+                    Date   = $date
+                    Header = $header
+                }
+            }
+        }
+
+        if (-not $days) {
+            Write-Host "Could not find Mensa dates." -ForegroundColor Red
+            return
+        }
+
+        # Find next available day
+        if ($Next) {
+            $nextDay = $days |
+                Where-Object { $_.Date -gt $today } |
+                Sort-Object Date |
+                Select-Object -First 1
+
+            if (-not $nextDay) {
+                Write-Host "No next Mensa day found." -ForegroundColor Yellow
+                return
+            }
+
+            $targetDate = $nextDay.Date
+        }
+
+        Write-Host ""
+        Write-Host " M E N S A   V I T A" -ForegroundColor Cyan
+        Write-Host " ==============================================" -ForegroundColor DarkGray
+
+        # Determine days to display
+        if ($Week) {
+            $selectedDays = $days |
+                Where-Object {
+                    $_.Date -ge $today -and
+                    $_.Date -le $today.AddDays(6)
+                } |
+                Sort-Object Date
+        }
+        else {
+            $selectedDays = $days |
+                Where-Object {
+                    $_.Date.Date -eq $targetDate.Date
+                } |
+                Select-Object -First 1
+        }
+
+        if (-not $selectedDays) {
+            Write-Host " No Mensa Vita menu found for the requested day." `
+                -ForegroundColor Yellow
+            Write-Host " ==============================================" `
+                -ForegroundColor DarkGray
+            return
+        }
+
+        foreach ($day in @($selectedDays)) {
+
+            Write-Host ""
+            Write-Host (
+                " {0} - {1}" -f
+                $day.Name,
+                $day.Date.ToString("dd.MM.yyyy")
+            ) -ForegroundColor Yellow
+
+            Write-Host " ----------------------------------------------" `
+                -ForegroundColor DarkGray
+
+            # The day's panel is the next sibling after the h3
+            $panel = $day.Header.nextSibling
+
+            while ($panel -and $panel.nodeType -ne 1) {
+                $panel = $panel.nextSibling
+            }
+
+            if (-not $panel) {
+                continue
+            }
+
+            $rows = $panel.getElementsByTagName("tr")
+
+            $found = $false
+
+            foreach ($row in $rows) {
+
+                $categoryNode = $row.getElementsByClassName("menue-category") |
+                    Select-Object -First 1
+
+                $descNode = $row.getElementsByClassName("menue-desc") |
+                    Select-Object -First 1
+
+                $priceNode = $row.getElementsByClassName("menue-price") |
+                    Select-Object -First 1
+
+                if (-not $categoryNode -or -not $descNode) {
+                    continue
+                }
+
+                $category = $categoryNode.innerText.Trim()
+                $description = $descNode.innerText.Trim()
+
+		if ($priceNode) {
+    			$price = $priceNode.innerText.Trim()
+    			$price = $price -replace '[^0-9,\.]', ''
+    			$price = "$price EUR"
+			}
+		else {
+    			$price = ""
+		}
+
+                Write-Host (" {0} + {1}" -f $category, $description)
+
+                if ($price) {
+                    Write-Host ("    {0}" -f $price) `
+                        -ForegroundColor Green
+                }
+
+                Write-Host ""
+
+                $found = $true
+            }
+
+            if (-not $found) {
+                Write-Host " No menu items found." `
+                    -ForegroundColor Yellow
+            }
+        }
+
+        Write-Host " ==============================================" `
+            -ForegroundColor DarkGray
+    }
+    catch {
+        Write-Host "Failed to retrieve Mensa Vita menu." `
+            -ForegroundColor Red
+        Write-Host $_.Exception.Message `
+            -ForegroundColor DarkRed
+    }
+}
