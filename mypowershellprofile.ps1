@@ -38,16 +38,114 @@ function ll {
         Sort-Object LastWriteTime -Descending |
         Format-Table Mode, LastWriteTime, Length, Name -AutoSize
 }
+
 function du {
     param(
-        [string]$Path = "."
+        [Parameter(Position = 0)]
+        [string]$Path = ".",
+
+        [switch]$s,
+        [switch]$h,
+        [switch]$sh
     )
 
-    $item = Get-Item $Path -ErrorAction Stop
+    function Format-Size {
+        param([long]$Bytes)
 
+        if ($Bytes -ge 1TB) {
+            "{0:N2} TB" -f ($Bytes / 1TB)
+        }
+        elseif ($Bytes -ge 1GB) {
+            "{0:N2} GB" -f ($Bytes / 1GB)
+        }
+        elseif ($Bytes -ge 1MB) {
+            "{0:N2} MB" -f ($Bytes / 1MB)
+        }
+        elseif ($Bytes -ge 1KB) {
+            "{0:N2} KB" -f ($Bytes / 1KB)
+        }
+        else {
+            "$Bytes B"
+        }
+    }
+
+    function Get-Permissions {
+        param($Item)
+
+        if ($Item.PSIsContainer) {
+            $type = "d"
+        }
+        else {
+            $type = "-"
+        }
+
+        if ($Item.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+            $write = "-"
+        }
+        else {
+            $write = "w"
+        }
+
+        # Windows does not have a direct Unix-style execute bit
+        # Use x for directories
+        if ($Item.PSIsContainer) {
+            $execute = "x"
+        }
+        else {
+            $execute = "-"
+        }
+
+        "$type" + "r$write$execute"
+    }
+
+    $item = Get-Item $Path -Force -ErrorAction Stop
+
+    # du -sh, du -sh ., or du -s -h
+    if (($sh -or ($s -and $h)) -and $item.PSIsContainer) {
+
+        Get-ChildItem $item.FullName -Force | ForEach-Object {
+
+            if ($_.PSIsContainer) {
+                $bytes = (
+                    Get-ChildItem $_.FullName -Recurse -File -Force `
+                        -ErrorAction SilentlyContinue |
+                    Measure-Object Length -Sum
+                ).Sum
+
+                if ($null -eq $bytes) {
+                    $bytes = 0
+                }
+            }
+            else {
+                $bytes = $_.Length
+            }
+
+            [PSCustomObject]@{
+                Bytes        = $bytes
+                LastModified = $_.LastWriteTime
+                Permissions  = Get-Permissions $_
+                Name         = $_.Name
+            }
+        } |
+        Sort-Object Bytes -Descending |
+        ForEach-Object {
+            "{0,10}  {1:dd.MM.yyyy HH:mm:ss}  {2,-4}  {3}" -f `
+                (Format-Size $_.Bytes),
+                $_.LastModified,
+                $_.Permissions,
+                $_.Name
+        }
+
+        return
+    }
+
+    # Normal behavior: total recursive size
     if ($item.PSIsContainer) {
-        $bytes = (Get-ChildItem $item.FullName -Recurse -File -Force -ErrorAction SilentlyContinue |
-            Measure-Object Length -Sum).Sum
+        $bytes = (
+            Get-ChildItem $item.FullName -Recurse -File -Force `
+                -ErrorAction SilentlyContinue |
+            Measure-Object Length -Sum
+        ).Sum
     }
     else {
         $bytes = $item.Length
@@ -57,22 +155,9 @@ function du {
         $bytes = 0
     }
 
-    if ($bytes -ge 1TB) {
-        "{0:N2} TB`t{1}" -f ($bytes / 1TB), $Path
-    }
-    elseif ($bytes -ge 1GB) {
-        "{0:N2} GB`t{1}" -f ($bytes / 1GB), $Path
-    }
-    elseif ($bytes -ge 1MB) {
-        "{0:N2} MB`t{1}" -f ($bytes / 1MB), $Path
-    }
-    elseif ($bytes -ge 1KB) {
-        "{0:N2} KB`t{1}" -f ($bytes / 1KB), $Path
-    }
-    else {
-        "{0} B`t{1}" -f $bytes, $Path
-    }
+    "{0}`t{1}" -f (Format-Size $bytes), $Path
 }
+
 function df {
     Get-PSDrive -PSProvider FileSystem |
         Where-Object { $_.Used -ne $null } |
@@ -239,10 +324,17 @@ function prompt {
         $displayPath = $currentPath
     }
 
-    Write-Host "$userName@$computerName" -ForegroundColor Green -NoNewline
-    Write-Host ":$displayPath" -ForegroundColor Cyan -NoNewline
+	# Conda environment
+	$condaEnv = $env:CONDA_DEFAULT_ENV
 
-    return "$ "
+	if ($condaEnv) {
+    		Write-Host "($condaEnv) " -ForegroundColor White -NoNewline
+	}
+
+	Write-Host "$userName@$computerName" -ForegroundColor Green -NoNewline
+	Write-Host ":$displayPath" -ForegroundColor Cyan -NoNewline
+
+	return "$ "
 }
 
 # ─────────────────────────────────────────────
@@ -251,56 +343,170 @@ function prompt {
 # ─────────────────────────────────────────────
 
 function weather {
-    	$lat = $WeatherLatitude
-	$lon = $WeatherLongitude
+    [CmdletBinding()]
+    param(
+        [Alias("f")]
+        [switch]$Forecast
+    )
+
+    $lat = $WeatherLatitude
+    $lon = $WeatherLongitude
 
     try {
-        $url = "https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m&timezone=auto"
+        # Fields requested from Open-Meteo
+        $currentFields = @(
+            "temperature_2m"
+            "relative_humidity_2m"
+            "apparent_temperature"
+            "precipitation"
+            "weather_code"
+            "wind_speed_10m"
+        ) -join ","
 
-        $w = Invoke-RestMethod -Uri $url -UseBasicParsing -ErrorAction Stop
+        $hourlyFields = @(
+            "temperature_2m"
+            "apparent_temperature"
+            "precipitation_probability"
+            "precipitation"
+            "weather_code"
+            "wind_speed_10m"
+        ) -join ","
 
-        $code = $w.current.weather_code
+        $url = "https://api.open-meteo.com/v1/forecast?" +
+               "latitude=$lat" +
+               "&longitude=$lon" +
+               "&current=$currentFields" +
+               "&hourly=$hourlyFields" +
+               "&forecast_hours=8" +
+               "&timezone=auto"
 
-        $condition = switch ($code) {
-            0     { "Clear sky" }
-            1     { "Mainly clear" }
-            2     { "Partly cloudy" }
-            3     { "Overcast" }
-            45    { "Fog" }
-            48    { "Rime fog" }
-            51    { "Light drizzle" }
-            53    { "Moderate drizzle" }
-            55    { "Dense drizzle" }
-            61    { "Light rain" }
-            63    { "Moderate rain" }
-            65    { "Heavy rain" }
-            71    { "Light snow" }
-            73    { "Moderate snow" }
-            75    { "Heavy snow" }
-            80    { "Light showers" }
-            81    { "Moderate showers" }
-            82    { "Heavy showers" }
-            95    { "Thunderstorm" }
-            96    { "Thunderstorm + hail" }
-            99    { "Thunderstorm + heavy hail" }
-            default { "Unknown" }
+        $w = Invoke-RestMethod `
+            -Uri $url `
+            -UseBasicParsing `
+            -ErrorAction Stop
+
+        # ------------------------------------------
+        # WEATHER CODE -> DESCRIPTION
+        # ------------------------------------------
+        function Get-WeatherCondition {
+            param(
+                [int]$Code
+            )
+
+            switch ($Code) {
+                0     { "Clear sky" }
+                1     { "Mainly clear" }
+                2     { "Partly cloudy" }
+                3     { "Overcast" }
+                45    { "Fog" }
+                48    { "Rime fog" }
+                51    { "Light drizzle" }
+                53    { "Moderate drizzle" }
+                55    { "Dense drizzle" }
+                56    { "Light freezing drizzle" }
+                57    { "Dense freezing drizzle" }
+                61    { "Light rain" }
+                63    { "Moderate rain" }
+                65    { "Heavy rain" }
+                66    { "Light freezing rain" }
+                67    { "Heavy freezing rain" }
+                71    { "Light snow" }
+                73    { "Moderate snow" }
+                75    { "Heavy snow" }
+                77    { "Snow grains" }
+                80    { "Light showers" }
+                81    { "Moderate showers" }
+                82    { "Heavy showers" }
+                85    { "Light snow showers" }
+                86    { "Heavy snow showers" }
+                95    { "Thunderstorm" }
+                96    { "Thunderstorm + hail" }
+                99    { "Thunderstorm + heavy hail" }
+                default { "Unknown" }
+            }
         }
+
+        # ==========================================
+        # FORECAST MODE
+        # weather -Forecast
+        # weather -f
+        # ==========================================
+        if ($Forecast.IsPresent) {
+
+            Write-Host ""
+            Write-Host " WEATHER FORECAST" -ForegroundColor Cyan
+            Write-Host " ============================================================================" -ForegroundColor DarkGray
+            Write-Host (" Location : {0}" -f $WeatherLocation) -ForegroundColor White
+            Write-Host " ----------------------------------------------------------------------------" -ForegroundColor DarkGray
+
+            $now = Get-Date
+            $shown = 0
+
+            for ($i = 0; $i -lt $w.hourly.time.Count; $i++) {
+
+                $forecastTime = [datetime]$w.hourly.time[$i]
+
+                # Skip hours that have already passed
+                if ($forecastTime -lt $now) {
+                    continue
+                }
+
+                $temp = [double]$w.hourly.temperature_2m[$i]
+                $feels = [double]$w.hourly.apparent_temperature[$i]
+                $rainProbability = [int]$w.hourly.precipitation_probability[$i]
+                $wind = [double]$w.hourly.wind_speed_10m[$i]
+                $weatherCode = [int]$w.hourly.weather_code[$i]
+
+                $condition = Get-WeatherCondition -Code $weatherCode
+
+                Write-Host (
+                    " {0,-6} {1,5:N1} C  Feels {2,5:N1} C  Rain {3,3}%  Wind {4,5:N1} km/h  {5}" -f `
+                    $forecastTime.ToString("HH:mm"),
+                    $temp,
+                    $feels,
+                    $rainProbability,
+                    $wind,
+                    $condition
+                )
+
+                $shown++
+
+                # Show only 5 hours
+                if ($shown -ge 5) {
+                    break
+                }
+            }
+
+            Write-Host " ============================================================================" -ForegroundColor DarkGray
+            Write-Host ""
+
+            return
+        }
+
+        # ==========================================
+        # CURRENT WEATHER MODE
+        # ==========================================
+
+        $condition = Get-WeatherCondition -Code ([int]$w.current.weather_code)
 
         Write-Host ""
         Write-Host " WEATHER" -ForegroundColor Cyan
         Write-Host " ==============================================" -ForegroundColor DarkGray
-	Write-Host (" Location : {0}" -f $WeatherLocation) -ForegroundColor White
-        Write-Host (" Temp     : {0:N1} C" -f $w.current.temperature_2m)
-        Write-Host (" Feels    : {0:N1} C" -f $w.current.apparent_temperature)
+        Write-Host (" Location : {0}" -f $WeatherLocation) -ForegroundColor White
+        Write-Host (" Temp     : {0:N1} C" -f [double]$w.current.temperature_2m)
+        Write-Host (" Feels    : {0:N1} C" -f [double]$w.current.apparent_temperature)
         Write-Host (" Humidity : {0}%" -f $w.current.relative_humidity_2m)
-        Write-Host (" Wind     : {0:N1} km/h" -f $w.current.wind_speed_10m)
-        Write-Host (" Rain     : {0:N1} mm" -f $w.current.precipitation)
+        Write-Host (" Wind     : {0:N1} km/h" -f [double]$w.current.wind_speed_10m)
+        Write-Host (" Rain     : {0:N1} mm" -f [double]$w.current.precipitation)
         Write-Host (" Condition: {0}" -f $condition)
         Write-Host " ==============================================" -ForegroundColor DarkGray
         Write-Host ""
     }
     catch {
-        Write-Host "Weather request failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host ""
+        Write-Host " Weather request failed:" -ForegroundColor Red
+        Write-Host " $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host ""
     }
 }
 
@@ -330,7 +536,7 @@ function mensa {
         $response = Invoke-WebRequest -Uri $url -UseBasicParsing
         $html = $response.Content
 
-        # Fix UTF-8 decoding for Windows PowerShell 5.1
+        # Fix UTF-8 mojibake caused by Windows PowerShell 5.1
         $enc = [System.Text.Encoding]::GetEncoding(28591)
         $utf8 = [System.Text.Encoding]::UTF8
         $bytes = $enc.GetBytes($html)
@@ -345,8 +551,7 @@ function mensa {
         $days = @()
 
         foreach ($header in $headers) {
-            $link = $header.getElementsByTagName("a") |
-                Select-Object -First 1
+            $link = $header.getElementsByTagName("a") | Select-Object -First 1
 
             if (-not $link) {
                 continue
@@ -375,6 +580,7 @@ function mensa {
             return
         }
 
+        # Find next available day
         if ($Next) {
             $nextDay = $days |
                 Where-Object { $_.Date -gt $today } |
@@ -393,6 +599,7 @@ function mensa {
         Write-Host " M E N S A   V I T A" -ForegroundColor Cyan
         Write-Host " ==============================================" -ForegroundColor DarkGray
 
+        # Determine days to display
         if ($Week) {
             $selectedDays = $days |
                 Where-Object {
@@ -412,17 +619,14 @@ function mensa {
         if (-not $selectedDays) {
             Write-Host " No Mensa Vita menu found for the requested day." `
                 -ForegroundColor Yellow
-
             Write-Host " ==============================================" `
                 -ForegroundColor DarkGray
-
             return
         }
 
         foreach ($day in @($selectedDays)) {
 
             Write-Host ""
-
             Write-Host (
                 " {0} - {1}" -f
                 $day.Name,
@@ -432,6 +636,7 @@ function mensa {
             Write-Host " ----------------------------------------------" `
                 -ForegroundColor DarkGray
 
+            # The day's panel is the next sibling after the h3
             $panel = $day.Header.nextSibling
 
             while ($panel -and $panel.nodeType -ne 1) {
@@ -443,20 +648,18 @@ function mensa {
             }
 
             $rows = $panel.getElementsByTagName("tr")
+
             $found = $false
 
             foreach ($row in $rows) {
 
-                $categoryNode =
-                    $row.getElementsByClassName("menue-category") |
+                $categoryNode = $row.getElementsByClassName("menue-category") |
                     Select-Object -First 1
 
-                $descNode =
-                    $row.getElementsByClassName("menue-desc") |
+                $descNode = $row.getElementsByClassName("menue-desc") |
                     Select-Object -First 1
 
-                $priceNode =
-                    $row.getElementsByClassName("menue-price") |
+                $priceNode = $row.getElementsByClassName("menue-price") |
                     Select-Object -First 1
 
                 if (-not $categoryNode -or -not $descNode) {
@@ -466,27 +669,20 @@ function mensa {
                 $category = $categoryNode.innerText.Trim()
                 $description = $descNode.innerText.Trim()
 
-                if ($priceNode) {
-                    $price = $priceNode.innerText.Trim()
+		if ($priceNode) {
+    			$price = $priceNode.innerText.Trim()
+    			$price = $price -replace '[^0-9,\.]', ''
+    			$price = "$price EUR"
+			}
+		else {
+    			$price = ""
+		}
 
-                    # Keep only the numeric price
-                    $price = $price -replace '[^0-9,\.]', ''
-                    $price = "$price EUR"
-                }
-                else {
-                    $price = ""
-                }
-
-                Write-Host (
-                    " {0} + {1}" -f
-                    $category,
-                    $description
-                )
+                Write-Host (" {0} + {1}" -f $category, $description)
 
                 if ($price) {
-                    Write-Host (
-                        "    {0}" -f $price
-                    ) -ForegroundColor Green
+                    Write-Host ("    {0}" -f $price) `
+                        -ForegroundColor Green
                 }
 
                 Write-Host ""
@@ -506,7 +702,6 @@ function mensa {
     catch {
         Write-Host "Failed to retrieve Mensa Vita menu." `
             -ForegroundColor Red
-
         Write-Host $_.Exception.Message `
             -ForegroundColor DarkRed
     }
