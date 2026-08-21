@@ -34,7 +34,12 @@ $env:ChocolateyInstall = "$env:LOCALAPPDATA\chocolatey"
 # linux like aliases
 
 function ll {
-    Get-ChildItem -Force |
+    param(
+        [Parameter(Position = 0)]
+        [string]$Path = "."
+    )
+
+    Get-ChildItem -LiteralPath $Path -Force |
         Sort-Object LastWriteTime -Descending |
         Format-Table Mode, LastWriteTime, Length, Name -AutoSize
 }
@@ -704,5 +709,26 @@ function mensa {
             -ForegroundColor Red
         Write-Host $_.Exception.Message `
             -ForegroundColor DarkRed
+    }
+}
+# Import the Chocolatey Profile that contains the necessary code to enable
+# tab-completions to function for `choco`.
+# Be aware that if you are missing these lines from your profile, tab completion
+# for `choco` will not function.
+# See https://ch0.co/tab-completion for details.
+$ChocolateyProfile = "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+if (Test-Path($ChocolateyProfile)) {
+  Import-Module "$ChocolateyProfile"
+}
+
+# Git bundled Vim
+$GitUsrBin = "$env:LOCALAPPDATA\Programs\Git\usr\bin"
+
+if (Test-Path $GitUsrBin) {
+    $env:Path = ($env:Path -split ';' |
+        Where-Object { $_ -ne 'C:\tools\vim\vim92' }) -join ';'
+
+    if (($env:Path -split ';') -notcontains $GitUsrBin) {
+        $env:Path += ";$GitUsrBin"
     }
 }
