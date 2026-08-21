@@ -732,3 +732,7 @@ if (Test-Path $GitUsrBin) {
         $env:Path += ";$GitUsrBin"
     }
 }
+
+function vi {
+    vim @args
+}
