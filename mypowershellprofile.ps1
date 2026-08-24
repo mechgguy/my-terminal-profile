@@ -734,5 +734,121 @@ if (Test-Path $GitUsrBin) {
 }
 
 function vi {
-    vim @args
+    vim.exe @args
+}
+
+function top {
+    Get-Process |
+        Sort-Object CPU -Descending |
+        Select-Object -First 20 `
+            Name,
+            Id,
+            @{Name="CPU(s)"; Expression={[math]::Round($_.CPU, 1)}},
+            @{Name="Memory(MB)"; Expression={[math]::Round($_.WorkingSet64 / 1MB, 1)}} |
+        Format-Table -AutoSize
+}
+
+function htop {
+    while ($true) {
+        Clear-Host
+
+        Write-Host " POWERSHELL HTOP" -ForegroundColor Cyan
+        Write-Host " Press Ctrl+C to exit" -ForegroundColor DarkGray
+        Write-Host ""
+
+        Get-Process |
+            Sort-Object CPU -Descending |
+            Select-Object -First 25 `
+                Name,
+                Id,
+                @{Name="CPU(s)"; Expression={[math]::Round($_.CPU, 1)}},
+                @{Name="Memory(MB)"; Expression={[math]::Round($_.WorkingSet64 / 1MB, 1)}} |
+            Format-Table -AutoSize
+
+        Start-Sleep -Seconds 2
+    }
+}
+
+function excel {
+    $excelPaths = @(
+        "C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+        "C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE"
+    )
+
+    $excelPath = $excelPaths |
+        Where-Object { Test-Path $_ } |
+        Select-Object -First 1
+
+    if (-not $excelPath) {
+        Write-Host "Excel executable not found." -ForegroundColor Red
+        return
+    }
+
+    if ($args.Count -gt 0) {
+        Start-Process -FilePath $excelPath -ArgumentList $args
+    }
+    else {
+        Start-Process -FilePath $excelPath
+    }
+}
+
+function dpkg {
+    [CmdletBinding()]
+    param(
+        [Alias("l")]
+        [switch]$List,
+
+        [Parameter(Position = 0)]
+        [string]$Search
+    )
+
+    try {
+        # Require -l for listing, similar to Linux dpkg
+        if (-not $List) {
+            Write-Host "Usage: dpkg -l [search]" -ForegroundColor Yellow
+            return
+        }
+
+        $paths = @(
+            "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
+            "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"
+        )
+
+        $allApps = foreach ($path in $paths) {
+            Get-ItemProperty -Path $path -ErrorAction SilentlyContinue |
+                Where-Object {
+                    $_.DisplayName -and
+                    $_.DisplayName.Trim() -ne ""
+                } |
+                Select-Object @{
+                    Name = "Status"
+                    Expression = { "ii" }
+                }, @{
+                    Name = "Name"
+                    Expression = { $_.DisplayName }
+                }, @{
+                    Name = "Version"
+                    Expression = { $_.DisplayVersion }
+                }, @{
+                    Name = "Publisher"
+                    Expression = { $_.Publisher }
+                }
+        }
+
+        # Search/filter if provided
+        if ($Search) {
+            $allApps = $allApps |
+                Where-Object {
+                    $_.Name -like "*$Search*"
+                }
+        }
+
+        $allApps |
+            Sort-Object Name -Unique |
+            Format-Table -AutoSize
+    }
+    catch {
+        Write-Error "Error retrieving installed applications: $($_.Exception.Message)"
+    }
 }
