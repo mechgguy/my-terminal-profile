@@ -2,15 +2,15 @@ $WeatherLatitude  = 50.1109
 $WeatherLongitude = 8.6821
 $WeatherLocation  = "Frankfurt"
 
-# ─────────────────────────────────────────────
+# =================================
 # Conda
-# ─────────────────────────────────────────────
+# =================================
 
 & "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"
 
-# ─────────────────────────────────────────────
+# =================================
 # Chocolatey + Git PATH
-# ─────────────────────────────────────────────
+# =================================
 
 $env:ChocolateyInstall = "$env:LOCALAPPDATA\chocolatey"
 
@@ -35,13 +35,38 @@ $env:ChocolateyInstall = "$env:LOCALAPPDATA\chocolatey"
 
 function ll {
     param(
-        [Parameter(Position = 0)]
         [string]$Path = "."
     )
 
-    Get-ChildItem -LiteralPath $Path -Force |
-        Sort-Object LastWriteTime -Descending |
-        Format-Table Mode, LastWriteTime, Length, Name -AutoSize
+    Get-ChildItem -Force -Path $Path |
+        Sort-Object `
+            @{Expression = { -not $_.PSIsContainer }},
+            @{Expression = { $_.LastWriteTime }; Descending = $false} |
+        Select-Object `
+            Mode,
+            LastWriteTime,
+            @{
+                Name = "Size"
+                Expression = {
+                    if ($_.PSIsContainer) {
+                        "<DIR>"
+                    }
+                    elseif ($_.Length -ge 1GB) {
+                        "{0:N2} GB" -f ($_.Length / 1GB)
+                    }
+                    elseif ($_.Length -ge 1MB) {
+                        "{0:N2} MB" -f ($_.Length / 1MB)
+                    }
+                    elseif ($_.Length -ge 1KB) {
+                        "{0:N2} KB" -f ($_.Length / 1KB)
+                    }
+                    else {
+                        "{0} B" -f $_.Length
+                    }
+                }
+            },
+            Name |
+        Format-Table -AutoSize
 }
 
 function du {
@@ -206,9 +231,9 @@ function .... {
     Set-Location ../../..
 }
 
-# ─────────────────────────────────────────────
+# =================================
 # GPU status
-# ─────────────────────────────────────────────
+# =================================
 
 function gpustat {
     if (-not (Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue)) {
@@ -308,9 +333,9 @@ Set-Alias -Name gpu -Value gpustat
 Set-Alias -Name watchgpu -Value watch-gpustat
 
 
-# ─────────────────────────────────────────────
+# =================================
 # Bash-style prompt
-# ─────────────────────────────────────────────
+# =================================
 
 function prompt {
     $userName = $env:USERNAME
@@ -342,10 +367,10 @@ function prompt {
 	return "$ "
 }
 
-# ─────────────────────────────────────────────
+# =================================
 # Weather
 # Fixed coordinates - no location access
-# ─────────────────────────────────────────────
+# =================================
 
 function weather {
     [CmdletBinding()]
