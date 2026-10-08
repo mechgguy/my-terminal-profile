@@ -877,3 +877,22 @@ function dpkg {
         Write-Error "Error retrieving installed applications: $($_.Exception.Message)"
     }
 }
+
+
+cd ~
+
+function newapply {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Name
+    )
+
+    $template = "C:\Users\manas.mehrotra\Downloads\Appl\fulltimeapply\fulltime apply\fulltime\Coverletter_Mehrotra.odt"
+    $folder = Join-Path (Get-Location) $Name
+    $output = Join-Path $folder "Coverletter_Mehrotra_$Name.odt"
+
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    Copy-Item $template $output
+
+    Set-Location $folder
+}
