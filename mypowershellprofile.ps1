@@ -887,7 +887,7 @@ function newapply {
         [string]$Name
     )
 
-    $template = "C:\Users\manas.mehrotra\Downloads\Appl\fulltimeapply\fulltime apply\fulltime\Coverletter_Mehrotra.odt"
+    $template = "C:\Users\manas.mehrotra\Downloads\Appl\fulltimeapply\fulltimeapply\fulltime\Coverletter_Mehrotra.odt"
     $folder = Join-Path (Get-Location) $Name
     $output = Join-Path $folder "Coverletter_Mehrotra_$Name.odt"
 
