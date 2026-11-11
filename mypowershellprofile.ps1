@@ -896,3 +896,26 @@ function newapply {
 
     Set-Location $folder
 }
+
+function newapplyde {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Name
+    )
+
+    $template = "C:\Users\manas.mehrotra\Downloads\Appl\fulltimeapply\fulltimeapply\fulltime\Anschreiben_Mehrotra.odt"
+    $folder = Join-Path (Get-Location) $Name
+    $output = Join-Path $folder "Anschreiben_Mehrotra_$Name.odt"
+
+    New-Item -ItemType Directory -Path $folder -Force | Out-Null
+    Copy-Item $template $output
+
+    Set-Location $folder
+}
+
+function Go-Projects { Set-Location "C:\Users\manas.mehrotra\OneDrive - JE\Documents\projects" }
+Set-Alias -Name projects -Value Go-Projects
+
+Set-Alias psmux "$env:LOCALAPPDATA\chocolatey\lib\psmux\tools\psmux.exe"
+Set-Alias tmux "$env:LOCALAPPDATA\chocolatey\lib\psmux\tools\psmux.exe"
+
